@@ -1,0 +1,295 @@
+syntax = "proto3";
+
+package arcinput.v1;
+
+message RuntimeHeader {
+  string workspace_id = 1;
+  uint64 topology_revision = 2;
+  uint64 control_epoch = 3;
+  string source_device_id = 4;
+  string target_device_id = 5;
+  uint64 sequence = 6;
+}
+
+message CapabilitySnapshot {
+  RuntimeHeader header = 1;
+  bool can_capture_pointer = 2;
+  bool can_capture_keyboard = 3;
+  bool can_suppress_local_input = 4;
+  bool can_place_internal_barrier = 5;
+  bool can_inject_absolute_pointer = 6;
+  bool can_inject_keyboard = 7;
+  bool can_control_elevated_apps = 8;
+  bool can_persist_permission = 9;
+  string limitation = 10;
+  OsFamily os_family = 11;
+  bool can_capture_native_quartz_events = 12;
+  bool can_inject_native_quartz_events = 13;
+  bool can_capture_precision_touchpad_events = 14;
+  bool can_inject_precision_touchpad_events = 15;
+  bool can_capture_system_gestures = 16;
+  bool can_inject_system_gestures = 17;
+  optional bool input_sharing_enabled = 18;
+  // Maximum supported gesture format; absent/zero with gesture opt-in means v1.
+  uint32 system_gesture_format_version = 19;
+  // Version-1 ConsumerKey bit masks; zero means unsupported (including old peers).
+  // Bits 0..7: previous, play/pause, next, mute, volume down/up, brightness down/up.
+  uint32 consumer_capture_mask = 20;
+  uint32 consumer_inject_mask = 21;
+  repeated string brightness_display_ids = 22;
+  // Foreground application pointer receiver; never implies global injection.
+  bool can_inject_app_pointer = 23;
+  // Supports an end-to-end authenticated input tunnel over one paired relay.
+  // Absent/false peers must never receive the new relay stream kind.
+  bool supports_input_relay = 24;
+}
+
+enum OsFamily {
+  OS_FAMILY_UNKNOWN = 0;
+  OS_FAMILY_WINDOWS = 1;
+  OS_FAMILY_MACOS = 2;
+  OS_FAMILY_LINUX_X11 = 3;
+  OS_FAMILY_LINUX_WAYLAND = 4;
+  OS_FAMILY_ANDROID = 5;
+  OS_FAMILY_IOS = 6;
+}
+
+enum DisplayRotation {
+  DISPLAY_ROTATION_0 = 0;
+  DISPLAY_ROTATION_90 = 1;
+  DISPLAY_ROTATION_180 = 2;
+  DISPLAY_ROTATION_270 = 3;
+}
+
+message DisplaySurface {
+  string display_id = 1;
+  string fingerprint = 2;
+  uint32 pixel_width = 3;
+  uint32 pixel_height = 4;
+  sint64 logical_x_milli = 5;
+  sint64 logical_y_milli = 6;
+  uint64 logical_width_milli = 7;
+  uint64 logical_height_milli = 8;
+  uint32 scale_milli = 9;
+  sint64 physical_width_um = 10;
+  sint64 physical_height_um = 11;
+  DisplayRotation rotation = 12;
+  uint32 geometry_confidence = 13;
+  string name = 14;
+  string device_id = 15;
+  sint64 desk_x_um = 16;
+  sint64 desk_y_um = 17;
+  sint64 desk_width_um = 18;
+  sint64 desk_height_um = 19;
+  uint64 inventory_revision = 20;
+}
+
+message DisplayInventory {
+  RuntimeHeader header = 1;
+  uint64 inventory_revision = 2;
+  repeated DisplaySurface displays = 3;
+}
+
+message EdgeSegment {
+  sint64 start_um = 1;
+  sint64 end_um = 2;
+}
+
+message Portal {
+  string portal_id = 1;
+  string source_display_id = 2;
+  uint32 source_edge = 3;
+  EdgeSegment source_segment = 4;
+  string target_display_id = 5;
+  uint32 target_edge = 6;
+  EdgeSegment target_segment = 7;
+  uint32 direction = 8;
+  uint32 activation_policy = 9;
+  sint64 inset_um = 10;
+  sint64 hysteresis_um = 11;
+  bool allow_while_dragging = 12;
+  uint32 status = 13;
+  uint32 activation_modifier_hid_usage = 14;
+  uint32 activation_dwell_milliseconds = 15;
+}
+
+message WorkspaceTopology {
+  RuntimeHeader header = 1;
+  repeated DisplaySurface displays = 2;
+  repeated Portal portals = 3;
+  // Explicitly removed screens, retained for manual restoration. Unlike an
+  // offline screen these do not occupy space in the routing layout.
+  repeated DisplaySurface excluded_displays = 4;
+}
+
+// Authenticated peers exchange dialable routes for other paired devices in the
+// same workspace. This lets the workspace converge to a direct mesh when mDNS
+// discovery is asymmetric on one device. The receiver still authenticates the
+// target against its local pairing record and the advertised certificate hash.
+message PeerRoute {
+  string device_id = 1;
+  repeated string endpoints = 2;
+  bytes certificate_sha256 = 3;
+  // The sender currently has a direct input session to this target and both
+  // support relay termination. This is not propagated transitively.
+  bool input_relay_available = 4;
+}
+
+message PeerRouteSnapshot {
+  RuntimeHeader header = 1;
+  repeated PeerRoute routes = 2;
+  string active_controller_device_id = 3;
+  uint64 active_control_epoch = 4;
+}
+
+message HeldState {
+  repeated uint32 held_physical_keys = 1;
+  repeated uint32 held_mouse_buttons = 2;
+  uint32 modifier_state = 3;
+  bool caps_lock = 4;
+  bool num_lock = 5;
+  bool scroll_lock = 6;
+  uint64 keyboard_profile_revision = 7;
+}
+
+message AcquireControl {
+  RuntimeHeader header = 1;
+  uint64 expected_control_epoch = 2;
+  // All devices in the controller's currently usable screen component.
+  repeated string participant_device_ids = 3;
+}
+message ControlGranted { RuntimeHeader header = 1; }
+message ControlRevoked { RuntimeHeader header = 1; string reason = 2; }
+
+message PrepareHandoff {
+  RuntimeHeader header = 1;
+  string source_display_id = 2;
+  string target_display_id = 3;
+  sint64 target_x_um = 4;
+  sint64 target_y_um = 5;
+  HeldState held_state = 6;
+}
+message HandoffReady { RuntimeHeader header = 1; }
+message CommitHandoff { RuntimeHeader header = 1; }
+message HandoffRejected { RuntimeHeader header = 1; string reason = 2; }
+
+message PointerState {
+  RuntimeHeader header = 1;
+  string display_id = 2;
+  sint64 desk_x_um = 3;
+  sint64 desk_y_um = 4;
+}
+
+message PointerMotion { sint64 desk_x_um = 1; sint64 desk_y_um = 2; }
+message PointerButton { uint32 hid_usage = 1; bool down = 2; uint32 click_count = 3; }
+
+enum ScrollUnit {
+  SCROLL_UNIT_UNSPECIFIED = 0;
+  SCROLL_UNIT_PIXEL = 1;
+  SCROLL_UNIT_WHEEL_DETENT = 2;
+}
+
+enum ScrollGesturePhase {
+  SCROLL_GESTURE_PHASE_UNSPECIFIED = 0;
+  SCROLL_GESTURE_PHASE_MAY_BEGIN = 1;
+  SCROLL_GESTURE_PHASE_BEGAN = 2;
+  SCROLL_GESTURE_PHASE_CHANGED = 3;
+  SCROLL_GESTURE_PHASE_ENDED = 4;
+  SCROLL_GESTURE_PHASE_CANCELLED = 5;
+}
+
+enum ScrollMomentumPhase {
+  SCROLL_MOMENTUM_PHASE_UNSPECIFIED = 0;
+  SCROLL_MOMENTUM_PHASE_BEGAN = 1;
+  SCROLL_MOMENTUM_PHASE_CHANGED = 2;
+  SCROLL_MOMENTUM_PHASE_ENDED = 3;
+}
+
+message Scroll {
+  sint64 x_milli = 1;
+  sint64 y_milli = 2;
+  // Retained for peers that predate the explicit unit field.
+  bool precise = 3;
+  // Retained for wire compatibility with the original unused phase field.
+  uint32 phase = 4;
+  // Version 1 is the opaque CFData returned by CGEventCreateData. Receivers
+  // must negotiate the capability and fall back to the structured fields if
+  // the payload cannot be safely reconstructed.
+  bytes native_quartz_event = 5;
+  uint32 native_quartz_format_version = 6;
+  ScrollUnit unit = 7;
+  ScrollGesturePhase gesture_phase = 8;
+  ScrollMomentumPhase momentum_phase = 9;
+}
+// `hid_usage` normally belongs to USB HID Usage Page 0x07. Value 0xffff is
+// reserved by ArcRelay for the macOS Fn/Globe modifier and is ignored by
+// non-macOS injection backends.
+message PhysicalKey { uint32 hid_usage = 1; bool down = 2; bool repeat = 3; }
+message SemanticChord { uint32 action = 1; bool down = 2; }
+message TextCommit { string text = 1; }
+message ConsumerKey { uint32 hid_usage = 1; bool down = 2; bool repeat = 3; }
+message ReleaseAll {}
+
+// Structured, negotiated macOS DockSwipe metadata. Never arbitrary native bytes.
+// v1 supports horizontal/vertical system swipes (axis 1/2); v2 adds system
+// pinch/spread (axis 3). Send v1 for swipes to retain old-peer compatibility.
+// Signed progress/velocity use the injection convention, with native phase
+// 1=begin, 2=change, 4=end, 8=cancel. Finger count is not inferred or transmitted.
+message SystemGesture {
+  uint32 format_version = 1;
+  uint32 axis = 2;
+  uint32 phase = 3;
+  double progress = 4;
+  double velocity_x = 5;
+  double velocity_y = 6;
+  // v2 preserves the native pinch direction flag; v1 must leave this false.
+  bool inverted_from_device = 7;
+}
+
+message InputEvent {
+  oneof event {
+    PointerMotion pointer_motion = 1;
+    PointerButton pointer_button = 2;
+    Scroll scroll = 3;
+    PhysicalKey physical_key = 4;
+    SemanticChord semantic_chord = 5;
+    TextCommit text_commit = 6;
+    ConsumerKey consumer_key = 7;
+    ReleaseAll release_all = 8;
+    SystemGesture system_gesture = 9;
+  }
+}
+
+message InputEventBatch {
+  RuntimeHeader header = 1;
+  repeated InputEvent events = 2;
+  uint64 held_state_checksum = 3;
+  uint64 sent_at_unix_micros = 4;
+}
+
+message InputStateSnapshot { RuntimeHeader header = 1; HeldState held_state = 2; }
+message PointerCorrection { RuntimeHeader header = 1; string display_id = 2; sint64 desk_x_um = 3; sint64 desk_y_um = 4; }
+message ReleaseControl { RuntimeHeader header = 1; HeldState held_state = 2; }
+message EmergencyRelease { RuntimeHeader header = 1; string reason = 2; }
+
+message ControlFrame {
+  oneof body {
+    CapabilitySnapshot capability_snapshot = 1;
+    DisplayInventory display_inventory = 2;
+    WorkspaceTopology workspace_topology = 3;
+    AcquireControl acquire_control = 4;
+    ControlGranted control_granted = 5;
+    ControlRevoked control_revoked = 6;
+    PrepareHandoff prepare_handoff = 7;
+    HandoffReady handoff_ready = 8;
+    CommitHandoff commit_handoff = 9;
+    HandoffRejected handoff_rejected = 10;
+    PointerState pointer_state = 11;
+    InputEventBatch input_event_batch = 12;
+    InputStateSnapshot input_state_snapshot = 13;
+    PointerCorrection pointer_correction = 14;
+    ReleaseControl release_control = 15;
+    EmergencyRelease emergency_release = 16;
+    PeerRouteSnapshot peer_route_snapshot = 17;
+  }
+}

@@ -1,0 +1,25 @@
+[package]
+name = "arcrelay-input"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+publish = false
+
+[dependencies]
+ts-rs = { version = "12", features = ["serde-json-impl", "chrono-impl", "uuid-impl", "no-serde-warnings"] }
+arc-swap = "1"
+arcrelay-peer = { version = "0.1.0", git = "https://github.com/ArcRelayProject/arcrelay-peer.git", rev = "739e41c49020cf19f0d490c64143e68e995aef83" }
+arcrelay-transport = { version = "0.1.0", git = "https://github.com/ArcRelayProject/arcrelay-transport.git", rev = "16305821fea3778e3fc544f0e57eb3b5b51fec11" }
+arcrelay-wire = { version = "0.1.0", git = "https://github.com/ArcRelayProject/arcrelay-wire.git", rev = "ac143db0e09039d7eeaf211f1399141086716533" }
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util"] }
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+
+[dev-dependencies]
+proptest = "1"
