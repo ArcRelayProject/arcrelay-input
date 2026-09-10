@@ -272,6 +272,33 @@ message PointerCorrection { RuntimeHeader header = 1; string display_id = 2; sin
 message ReleaseControl { RuntimeHeader header = 1; HeldState held_state = 2; }
 message EmergencyRelease { RuntimeHeader header = 1; string reason = 2; }
 
+enum GazeCalibrationStage {
+  GAZE_CALIBRATION_STAGE_UNSPECIFIED = 0;
+  GAZE_CALIBRATION_STAGE_CALIBRATING = 1;
+  GAZE_CALIBRATION_STAGE_PAUSED = 2;
+  GAZE_CALIBRATION_STAGE_TRANSITION = 3;
+  GAZE_CALIBRATION_STAGE_CLOSE = 4;
+  GAZE_CALIBRATION_STAGE_CANCEL = 5;
+}
+
+// Ephemeral UI-only state for coordinated calibration across authenticated
+// Arc Input peers. It never carries camera pixels or biometric observations.
+message GazeCalibrationOverlay {
+  RuntimeHeader header = 1;
+  string session_id = 2;
+  GazeCalibrationStage stage = 3;
+  string display_id = 4;
+  uint32 screen_index = 5;
+  optional uint32 next_screen_index = 6;
+  string screen_name = 7;
+  string next_screen_name = 8;
+  double target_u = 9;
+  double target_v = 10;
+  double dwell_progress = 11;
+  uint32 current = 12;
+  uint32 total = 13;
+}
+
 message ControlFrame {
   oneof body {
     CapabilitySnapshot capability_snapshot = 1;
@@ -291,5 +318,6 @@ message ControlFrame {
     ReleaseControl release_control = 15;
     EmergencyRelease emergency_release = 16;
     PeerRouteSnapshot peer_route_snapshot = 17;
+    GazeCalibrationOverlay gaze_calibration_overlay = 18;
   }
 }
