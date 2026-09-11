@@ -232,9 +232,11 @@ message ReleaseAll {}
 
 // Structured, negotiated macOS DockSwipe metadata. Never arbitrary native bytes.
 // v1 supports horizontal/vertical system swipes (axis 1/2); v2 adds system
-// pinch/spread (axis 3). Send v1 for swipes to retain old-peer compatibility.
+// pinch/spread (axis 3); v3 preserves the physical contact count so receivers
+// can distinguish the platform's three- and four-finger actions. Send the
+// oldest sufficient version to retain old-peer compatibility.
 // Signed progress/velocity use the injection convention, with native phase
-// 1=begin, 2=change, 4=end, 8=cancel. Finger count is not inferred or transmitted.
+// 1=begin, 2=change, 4=end, 8=cancel.
 message SystemGesture {
   uint32 format_version = 1;
   uint32 axis = 2;
@@ -244,6 +246,9 @@ message SystemGesture {
   double velocity_y = 6;
   // v2 preserves the native pinch direction flag; v1 must leave this false.
   bool inverted_from_device = 7;
+  // v3: 2 for pinch/spread, 3 or 4 for a multi-finger swipe. Zero means the
+  // legacy receiver-selected default and remains valid in v1/v2 frames.
+  uint32 finger_count = 8;
 }
 
 message InputEvent {
