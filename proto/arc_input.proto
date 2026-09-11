@@ -299,6 +299,18 @@ message GazeCalibrationOverlay {
   uint32 total = 13;
 }
 
+// A gaze-capable peer publishes the currently selected workspace display.
+// Input ownership may move between physical keyboards and mice while this
+// target remains active, so a new controller can continue routing to it.
+message GazeTargetSelection {
+  RuntimeHeader header = 1;
+  bool active = 2;
+  string target_device_id = 3;
+  string target_display_id = 4;
+  sint64 target_x_um = 5;
+  sint64 target_y_um = 6;
+}
+
 message ControlFrame {
   oneof body {
     CapabilitySnapshot capability_snapshot = 1;
@@ -319,5 +331,6 @@ message ControlFrame {
     EmergencyRelease emergency_release = 16;
     PeerRouteSnapshot peer_route_snapshot = 17;
     GazeCalibrationOverlay gaze_calibration_overlay = 18;
+    GazeTargetSelection gaze_target_selection = 19;
   }
 }

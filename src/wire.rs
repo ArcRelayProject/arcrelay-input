@@ -127,6 +127,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gaze_target_selection_round_trips_as_workspace_route_metadata() {
+        let frame = proto::ControlFrame {
+            body: Some(proto::control_frame::Body::GazeTargetSelection(
+                proto::GazeTargetSelection {
+                    header: Some(proto::RuntimeHeader {
+                        workspace_id: "desk".into(),
+                        topology_revision: 8,
+                        control_epoch: 21,
+                        source_device_id: "gaze-source".into(),
+                        target_device_id: "current-controller".into(),
+                        sequence: 0,
+                    }),
+                    active: true,
+                    target_device_id: "looked-at-device".into(),
+                    target_display_id: "looked-at-screen".into(),
+                    target_x_um: 750_000,
+                    target_y_um: 150_000,
+                },
+            )),
+        };
+        let (mut writer, mut reader) = tokio::io::duplex(1024);
+        write_control(&mut writer, &frame).await.unwrap();
+        assert_eq!(read_control(&mut reader).await.unwrap(), frame);
+    }
+
+    #[tokio::test]
     async fn native_quartz_scroll_round_trips_with_portable_fallback() {
         let batch = proto::InputEventBatch {
             header: None,
