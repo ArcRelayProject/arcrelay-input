@@ -4,7 +4,8 @@ use crate::proto;
 
 pub const SYSTEM_GESTURE_FORMAT_VERSION: u32 = 1;
 pub const SYSTEM_PINCH_FORMAT_VERSION: u32 = 2;
-pub const MAX_SYSTEM_GESTURE_FORMAT_VERSION: u32 = SYSTEM_PINCH_FORMAT_VERSION;
+pub const SYSTEM_GESTURE_CONTACTS_FORMAT_VERSION: u32 = 3;
+pub const MAX_SYSTEM_GESTURE_FORMAT_VERSION: u32 = SYSTEM_GESTURE_CONTACTS_FORMAT_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SystemGestureEvent {
@@ -17,12 +18,22 @@ pub struct SystemGestureEvent {
     /// Native direction metadata for v2 gestures; v1 always used false.
     #[serde(default)]
     pub inverted_from_device: bool,
+    /// Physical contacts for v3: 2 for pinch, 3/4 for a system swipe.
+    /// Zero retains the legacy receiver-selected contact count.
+    #[serde(default)]
+    pub finger_count: u32,
 }
 
 impl SystemGestureEvent {
     pub fn validate(self) -> Result<Self, &'static str> {
         if !matches!(self.axis, 1..=3) || !matches!(self.phase, 1 | 2 | 4 | 8) {
             return Err("unsupported system gesture axis or phase");
+        }
+        if !matches!(
+            (self.axis, self.finger_count),
+            (1 | 2, 0 | 3 | 4) | (3, 0 | 2)
+        ) {
+            return Err("unsupported system gesture contact count");
         }
         if !self.progress.is_finite()
             || self.progress.abs() > 4.0
@@ -36,9 +47,12 @@ impl SystemGestureEvent {
         Ok(self)
     }
 
-    /// Swipes retain v1 interoperability; pinch requires explicit v2 support.
+    /// Swipes retain v1 interoperability, pinch requires v2, and an explicit
+    /// physical contact count requires v3.
     pub fn format_version(self) -> u32 {
-        if self.axis == 3 || self.inverted_from_device {
+        if self.finger_count != 0 {
+            SYSTEM_GESTURE_CONTACTS_FORMAT_VERSION
+        } else if self.axis == 3 || self.inverted_from_device {
             SYSTEM_PINCH_FORMAT_VERSION
         } else {
             SYSTEM_GESTURE_FORMAT_VERSION
@@ -73,6 +87,7 @@ impl TryFrom<proto::SystemGesture> for SystemGestureEvent {
             velocity_x: value.velocity_x,
             velocity_y: value.velocity_y,
             inverted_from_device: value.inverted_from_device,
+            finger_count: value.finger_count,
         }
         .validate_format(value.format_version)
     }
@@ -88,6 +103,7 @@ impl From<SystemGestureEvent> for proto::SystemGesture {
             velocity_x: value.velocity_x,
             velocity_y: value.velocity_y,
             inverted_from_device: value.inverted_from_device,
+            finger_count: value.finger_count,
         }
     }
 }
@@ -113,7 +129,9 @@ impl SystemGestureSequence {
         if event.phase == 1 {
             output.extend(self.cancel());
         } else if self.active.is_none_or(|active| {
-            active.axis != event.axis || active.inverted_from_device != event.inverted_from_device
+            active.axis != event.axis
+                || active.inverted_from_device != event.inverted_from_device
+                || active.finger_count != event.finger_count
         }) {
             // A tail from a prior route must not start or mutate an animation.
             return Ok(output);
@@ -140,6 +158,7 @@ mod tests {
             velocity_x: -5.0,
             velocity_y: -5.0,
             inverted_from_device: false,
+            finger_count: 0,
         }
     }
 
@@ -176,10 +195,19 @@ mod tests {
         .validate()
         .is_err());
         assert!(SystemGestureEvent::try_from(proto::SystemGesture {
-            format_version: 3,
+            format_version: 4,
             ..event(1).into()
         })
         .is_err());
+        for (axis, finger_count) in [(1, 2), (2, 2), (3, 3), (3, 4), (3, 5)] {
+            assert!(SystemGestureEvent {
+                axis,
+                finger_count,
+                ..event(1)
+            }
+            .validate()
+            .is_err());
+        }
     }
 
     #[test]
@@ -236,18 +264,45 @@ mod tests {
     }
 
     #[test]
-    fn negotiation_keeps_legacy_swipes_and_requires_explicit_pinch_support() {
+    fn contact_count_requires_v3_and_cannot_change_mid_gesture() {
+        let swipe = SystemGestureEvent {
+            finger_count: 3,
+            ..event(1)
+        };
+        let wire = proto::SystemGesture::from(swipe);
+        assert_eq!(wire.format_version, 3);
+        assert_eq!(SystemGestureEvent::try_from(wire), Ok(swipe));
+        assert!(SystemGestureEvent::try_from(proto::SystemGesture {
+            format_version: 2,
+            ..wire
+        })
+        .is_err());
+        let mut sequence = SystemGestureSequence::default();
+        assert_eq!(sequence.apply(swipe).unwrap(), vec![swipe]);
+        assert!(sequence
+            .apply(SystemGestureEvent {
+                phase: 2,
+                finger_count: 4,
+                ..swipe
+            })
+            .unwrap()
+            .is_empty());
+        assert_eq!(sequence.cancel(), Some(swipe.cancelled()));
+    }
+
+    #[test]
+    fn negotiation_keeps_legacy_swipes_and_requires_explicit_new_features() {
         let modern = crate::PlatformCapabilities {
             can_capture_system_gestures: true,
             can_inject_system_gestures: true,
-            system_gesture_format_version: 2,
+            system_gesture_format_version: 3,
             ..Default::default()
         };
         let legacy = crate::PlatformCapabilities {
             system_gesture_format_version: 0,
             ..modern.clone()
         };
-        assert_eq!(modern.negotiated_system_gesture_version(&modern), 2);
+        assert_eq!(modern.negotiated_system_gesture_version(&modern), 3);
         assert_eq!(modern.negotiated_system_gesture_version(&legacy), 1);
         assert_eq!(legacy.negotiated_system_gesture_version(&modern), 1);
         assert_eq!(
@@ -262,7 +317,7 @@ mod tests {
             system_gesture_format_version: u32::MAX,
             ..modern.clone()
         };
-        assert_eq!(modern.negotiated_system_gesture_version(&future), 2);
+        assert_eq!(modern.negotiated_system_gesture_version(&future), 3);
     }
 
     #[test]

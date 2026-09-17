@@ -131,6 +131,8 @@ pub enum CapturedInputEvent {
     PointerButton {
         hid_usage: u16,
         down: bool,
+        /// Platform click sequence count (1 = single, 2 = double, 3 = triple).
+        click_count: u8,
     },
     Scroll {
         event: ScrollEvent,
@@ -210,7 +212,12 @@ pub trait InputInjectionPort: Send + Sync {
         logical_point: LogicalPoint,
     ) -> Result<(), PlatformError>;
     fn apply_keyboard(&self, event: &MappedKeyboardEvent) -> Result<(), PlatformError>;
-    fn pointer_button(&self, hid_usage: u16, down: bool) -> Result<(), PlatformError>;
+    fn pointer_button(
+        &self,
+        hid_usage: u16,
+        down: bool,
+        click_count: u8,
+    ) -> Result<(), PlatformError>;
     fn scroll(&self, event: ScrollEvent) -> Result<(), PlatformError>;
     /// Decode and post a flattened Quartz scroll event. Implementations must
     /// validate both the payload bound and the reconstructed event type.

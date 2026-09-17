@@ -94,6 +94,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gaze_calibration_overlay_round_trips_without_camera_data() {
+        let frame = proto::ControlFrame {
+            body: Some(proto::control_frame::Body::GazeCalibrationOverlay(
+                proto::GazeCalibrationOverlay {
+                    header: Some(proto::RuntimeHeader {
+                        workspace_id: "desk".into(),
+                        topology_revision: 3,
+                        control_epoch: 0,
+                        source_device_id: "controller".into(),
+                        target_device_id: "display-host".into(),
+                        sequence: 0,
+                    }),
+                    session_id: "calibration-1".into(),
+                    stage: proto::GazeCalibrationStage::Calibrating as i32,
+                    display_id: "screen-a".into(),
+                    screen_index: 0,
+                    next_screen_index: None,
+                    screen_name: "Studio Display".into(),
+                    next_screen_name: String::new(),
+                    target_u: 0.5,
+                    target_v: 0.5,
+                    dwell_progress: 0.75,
+                    current: 4,
+                    total: 18,
+                },
+            )),
+        };
+        let (mut writer, mut reader) = tokio::io::duplex(2048);
+        write_control(&mut writer, &frame).await.unwrap();
+        assert_eq!(read_control(&mut reader).await.unwrap(), frame);
+    }
+
+    #[tokio::test]
+    async fn gaze_target_selection_round_trips_as_workspace_route_metadata() {
+        let frame = proto::ControlFrame {
+            body: Some(proto::control_frame::Body::GazeTargetSelection(
+                proto::GazeTargetSelection {
+                    header: Some(proto::RuntimeHeader {
+                        workspace_id: "desk".into(),
+                        topology_revision: 8,
+                        control_epoch: 21,
+                        source_device_id: "gaze-source".into(),
+                        target_device_id: "current-controller".into(),
+                        sequence: 0,
+                    }),
+                    active: true,
+                    target_device_id: "looked-at-device".into(),
+                    target_display_id: "looked-at-screen".into(),
+                    target_x_um: 750_000,
+                    target_y_um: 150_000,
+                },
+            )),
+        };
+        let (mut writer, mut reader) = tokio::io::duplex(1024);
+        write_control(&mut writer, &frame).await.unwrap();
+        assert_eq!(read_control(&mut reader).await.unwrap(), frame);
+    }
+
+    #[tokio::test]
     async fn native_quartz_scroll_round_trips_with_portable_fallback() {
         let batch = proto::InputEventBatch {
             header: None,
@@ -131,6 +190,7 @@ mod tests {
                             velocity_x: -3.2,
                             velocity_y: -3.2,
                             inverted_from_device: false,
+                            finger_count: 3,
                         }
                         .into(),
                     )),
