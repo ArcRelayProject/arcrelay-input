@@ -20,6 +20,73 @@ pub const HID_LEFT_META: u16 = 0xe3;
 /// usage page. Non-macOS injection backends deliberately ignore this value.
 pub const HID_KEY_FUNCTION: u16 = u16::MAX;
 
+pub const MAX_SIMULATED_KEYBOARD_TEXT_CHARS: usize = 256;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SimulatedKeyStroke {
+    pub hid_usage: u16,
+    pub shift: bool,
+}
+
+/// Convert printable ASCII text into US-keyboard HID strokes. This deliberately
+/// excludes control characters and non-ASCII text: physical key injection is
+/// intended for remote applications that reject clipboard and Unicode events.
+pub fn simulated_key_strokes(text: &str) -> Result<Vec<SimulatedKeyStroke>, &'static str> {
+    let character_count = text.chars().count();
+    if character_count == 0 {
+        return Err("simulated keyboard input cannot be empty");
+    }
+    if character_count > MAX_SIMULATED_KEYBOARD_TEXT_CHARS {
+        return Err("simulated keyboard input is limited to 256 characters");
+    }
+
+    text.chars()
+        .map(|character| {
+            let (hid_usage, shift) = match character {
+                'a'..='z' => (0x04 + (character as u16 - 'a' as u16), false),
+                'A'..='Z' => (0x04 + (character as u16 - 'A' as u16), true),
+                '1'..='9' => (0x1E + (character as u16 - '1' as u16), false),
+                '0' => (0x27, false),
+                ' ' => (0x2C, false),
+                '-' => (0x2D, false),
+                '_' => (0x2D, true),
+                '=' => (0x2E, false),
+                '+' => (0x2E, true),
+                '[' => (0x2F, false),
+                '{' => (0x2F, true),
+                ']' => (0x30, false),
+                '}' => (0x30, true),
+                '\\' => (0x31, false),
+                '|' => (0x31, true),
+                ';' => (0x33, false),
+                ':' => (0x33, true),
+                '\'' => (0x34, false),
+                '"' => (0x34, true),
+                '`' => (0x35, false),
+                '~' => (0x35, true),
+                ',' => (0x36, false),
+                '<' => (0x36, true),
+                '.' => (0x37, false),
+                '>' => (0x37, true),
+                '/' => (0x38, false),
+                '?' => (0x38, true),
+                '!' => (0x1E, true),
+                '@' => (0x1F, true),
+                '#' => (0x20, true),
+                '$' => (0x21, true),
+                '%' => (0x22, true),
+                '^' => (0x23, true),
+                '&' => (0x24, true),
+                '*' => (0x25, true),
+                '(' => (0x26, true),
+                ')' => (0x27, true),
+                _ => return Err("simulated keyboard input supports printable ASCII only"),
+            };
+            Ok(SimulatedKeyStroke { hid_usage, shift })
+        })
+        .collect()
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, ts_rs::TS,
 )]
@@ -280,6 +347,66 @@ pub fn target_chord(action: SemanticAction, target: OsFamily) -> KeyChord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simulated_key_strokes_cover_letters_digits_and_symbols() {
+        let strokes = simulated_key_strokes("aZ0! _?/\\").unwrap();
+        assert_eq!(
+            strokes,
+            vec![
+                SimulatedKeyStroke {
+                    hid_usage: 0x04,
+                    shift: false
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x1D,
+                    shift: true
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x27,
+                    shift: false
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x1E,
+                    shift: true
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x2C,
+                    shift: false
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x2D,
+                    shift: true
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x38,
+                    shift: true
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x38,
+                    shift: false
+                },
+                SimulatedKeyStroke {
+                    hid_usage: 0x31,
+                    shift: false
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn simulated_key_strokes_accept_every_printable_ascii_character() {
+        let text: String = (0x20_u8..=0x7E).map(char::from).collect();
+        assert_eq!(simulated_key_strokes(&text).unwrap().len(), 95);
+    }
+
+    #[test]
+    fn simulated_key_strokes_reject_controls_unicode_and_oversized_text() {
+        assert!(simulated_key_strokes("").is_err());
+        assert!(simulated_key_strokes("line\nfeed").is_err());
+        assert!(simulated_key_strokes("中文").is_err());
+        assert!(simulated_key_strokes(&"a".repeat(MAX_SIMULATED_KEYBOARD_TEXT_CHARS + 1)).is_err());
+    }
 
     #[test]
     fn productivity_maps_windows_copy_to_macos_semantics() {
