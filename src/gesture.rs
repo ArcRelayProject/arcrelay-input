@@ -5,14 +5,22 @@ use crate::proto;
 pub const SYSTEM_GESTURE_FORMAT_VERSION: u32 = 1;
 pub const SYSTEM_PINCH_FORMAT_VERSION: u32 = 2;
 pub const SYSTEM_GESTURE_CONTACTS_FORMAT_VERSION: u32 = 3;
-pub const MAX_SYSTEM_GESTURE_FORMAT_VERSION: u32 = SYSTEM_GESTURE_CONTACTS_FORMAT_VERSION;
+pub const SYSTEM_NOTIFICATION_CENTER_FORMAT_VERSION: u32 = 4;
+pub const MAX_SYSTEM_GESTURE_FORMAT_VERSION: u32 = SYSTEM_NOTIFICATION_CENTER_FORMAT_VERSION;
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SystemGestureEvent {
     /// 1: horizontal swipe, 2: vertical swipe, 3: system pinch/spread.
+    /// 4: right-edge Notification Center gesture (v4), never a Dock axis.
     pub axis: u32,
     pub phase: u32,
     pub progress: f64,
+    /// V4 edge motion in native normalized trackpad units, per event.
+    /// Both axes are retained: macOS ignores an incomplete FluidTouch payload.
+    #[serde(default)]
+    pub delta_x: f64,
+    #[serde(default)]
+    pub delta_y: f64,
     pub velocity_x: f64,
     pub velocity_y: f64,
     /// Native direction metadata for v2 gestures; v1 always used false.
@@ -26,14 +34,27 @@ pub struct SystemGestureEvent {
 
 impl SystemGestureEvent {
     pub fn validate(self) -> Result<Self, &'static str> {
-        if !matches!(self.axis, 1..=3) || !matches!(self.phase, 1 | 2 | 4 | 8) {
+        if !matches!(self.axis, 1..=4) || !matches!(self.phase, 1 | 2 | 4 | 8) {
             return Err("unsupported system gesture axis or phase");
         }
         if !matches!(
             (self.axis, self.finger_count),
-            (1 | 2, 0 | 3 | 4) | (3, 0 | 2)
+            (1 | 2, 0 | 3 | 4) | (3, 0 | 2) | (4, 2)
         ) {
             return Err("unsupported system gesture contact count");
+        }
+        if self.axis != 4 && (self.delta_x != 0.0 || self.delta_y != 0.0) {
+            return Err("edge displacement requires a Notification Center gesture");
+        }
+        if self.axis == 4 && self.inverted_from_device {
+            return Err("Notification Center uses native device coordinates");
+        }
+        if !self.delta_x.is_finite()
+            || self.delta_x.abs() > 4.0
+            || !self.delta_y.is_finite()
+            || self.delta_y.abs() > 4.0
+        {
+            return Err("edge displacement is non-finite or out of bounds");
         }
         if !self.progress.is_finite()
             || self.progress.abs() > 4.0
@@ -48,9 +69,11 @@ impl SystemGestureEvent {
     }
 
     /// Swipes retain v1 interoperability, pinch requires v2, and an explicit
-    /// physical contact count requires v3.
+    /// physical contact count requires v3. Notification Center requires v4.
     pub fn format_version(self) -> u32 {
-        if self.finger_count != 0 {
+        if self.axis == 4 {
+            SYSTEM_NOTIFICATION_CENTER_FORMAT_VERSION
+        } else if self.finger_count != 0 {
             SYSTEM_GESTURE_CONTACTS_FORMAT_VERSION
         } else if self.axis == 3 || self.inverted_from_device {
             SYSTEM_PINCH_FORMAT_VERSION
@@ -84,6 +107,8 @@ impl TryFrom<proto::SystemGesture> for SystemGestureEvent {
             axis: value.axis,
             phase: value.phase,
             progress: value.progress,
+            delta_x: value.delta_x,
+            delta_y: value.delta_y,
             velocity_x: value.velocity_x,
             velocity_y: value.velocity_y,
             inverted_from_device: value.inverted_from_device,
@@ -100,6 +125,8 @@ impl From<SystemGestureEvent> for proto::SystemGesture {
             axis: value.axis,
             phase: value.phase,
             progress: value.progress,
+            delta_x: value.delta_x,
+            delta_y: value.delta_y,
             velocity_x: value.velocity_x,
             velocity_y: value.velocity_y,
             inverted_from_device: value.inverted_from_device,
@@ -158,6 +185,8 @@ mod tests {
             velocity_x: -5.0,
             velocity_y: -5.0,
             inverted_from_device: false,
+            delta_x: 0.0,
+            delta_y: 0.0,
             finger_count: 0,
         }
     }
@@ -176,7 +205,7 @@ mod tests {
             .validate()
             .is_err());
         }
-        for axis in [0, 4, u32::MAX] {
+        for axis in [0, 5, u32::MAX] {
             assert!(SystemGestureEvent { axis, ..event(1) }.validate().is_err());
         }
         for phase in [0, 3, 128] {
@@ -195,11 +224,20 @@ mod tests {
         .validate()
         .is_err());
         assert!(SystemGestureEvent::try_from(proto::SystemGesture {
-            format_version: 4,
+            format_version: 5,
             ..event(1).into()
         })
         .is_err());
-        for (axis, finger_count) in [(1, 2), (2, 2), (3, 3), (3, 4), (3, 5)] {
+        for (axis, finger_count) in [
+            (1, 2),
+            (2, 2),
+            (3, 3),
+            (3, 4),
+            (3, 5),
+            (4, 0),
+            (4, 3),
+            (4, 4),
+        ] {
             assert!(SystemGestureEvent {
                 axis,
                 finger_count,
@@ -208,6 +246,89 @@ mod tests {
             .validate()
             .is_err());
         }
+    }
+
+    #[test]
+    fn edge_displacement_is_bounded_versioned_and_defaults_for_old_saved_events() {
+        let old = serde_json::to_value(event(1)).unwrap();
+        let mut legacy = old.as_object().unwrap().clone();
+        legacy.remove("delta_x");
+        legacy.remove("delta_y");
+        assert_eq!(
+            serde_json::from_value::<SystemGestureEvent>(legacy.into()).unwrap(),
+            event(1)
+        );
+        assert!(SystemGestureEvent {
+            delta_y: 0.1,
+            ..event(1)
+        }
+        .validate()
+        .is_err());
+        let edge = SystemGestureEvent {
+            axis: 4,
+            finger_count: 2,
+            ..event(1)
+        };
+        for bad in [f64::NAN, f64::INFINITY, -4.01, 4.01] {
+            assert!(SystemGestureEvent {
+                delta_x: bad,
+                ..edge
+            }
+            .validate()
+            .is_err());
+            assert!(SystemGestureEvent {
+                delta_y: bad,
+                ..edge
+            }
+            .validate()
+            .is_err());
+        }
+        assert!(SystemGestureEvent {
+            inverted_from_device: true,
+            ..edge
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn notification_edge_requires_v4_and_preserves_cancellation_and_route_identity() {
+        use prost::Message;
+        let edge = SystemGestureEvent {
+            axis: 4,
+            delta_x: -0.08203125,
+            delta_y: 0.0280303955078125,
+            finger_count: 2,
+            ..event(1)
+        };
+        for phase in [1, 2, 4, 8] {
+            let frame = SystemGestureEvent { phase, ..edge };
+            let wire = proto::SystemGesture::from(frame);
+            assert_eq!(wire.format_version, 4);
+            let decoded = proto::SystemGesture::decode(wire.encode_to_vec().as_slice()).unwrap();
+            assert_eq!(SystemGestureEvent::try_from(decoded), Ok(frame));
+            for legacy in [0, 1, 2, 3] {
+                assert!(frame.validate_format(legacy).is_err());
+            }
+        }
+        let mut sequence = SystemGestureSequence::default();
+        assert!(sequence
+            .apply(SystemGestureEvent { phase: 2, ..edge })
+            .unwrap()
+            .is_empty());
+        assert_eq!(sequence.apply(edge).unwrap(), vec![edge]);
+        assert!(sequence
+            .apply(SystemGestureEvent {
+                phase: 2,
+                ..event(1)
+            })
+            .unwrap()
+            .is_empty());
+        assert_eq!(sequence.cancel(), Some(edge.cancelled()));
+        assert!(sequence
+            .apply(SystemGestureEvent { phase: 4, ..edge })
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

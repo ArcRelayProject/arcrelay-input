@@ -190,6 +190,8 @@ mod tests {
                             velocity_x: -3.2,
                             velocity_y: -3.2,
                             inverted_from_device: false,
+                            delta_x: 0.0,
+                            delta_y: 0.0,
                             finger_count: 3,
                         }
                         .into(),

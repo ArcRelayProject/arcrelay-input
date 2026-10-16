@@ -230,11 +230,13 @@ message TextCommit { string text = 1; }
 message ConsumerKey { uint32 hid_usage = 1; bool down = 2; bool repeat = 3; }
 message ReleaseAll {}
 
-// Structured, negotiated macOS DockSwipe metadata. Never arbitrary native bytes.
+// Structured, negotiated macOS system gesture metadata. Never arbitrary native bytes.
 // v1 supports horizontal/vertical system swipes (axis 1/2); v2 adds system
 // pinch/spread (axis 3); v3 preserves the physical contact count so receivers
 // can distinguish the platform's three- and four-finger actions. Send the
-// oldest sufficient version to retain old-peer compatibility.
+// oldest sufficient version to retain old-peer compatibility. V4 adds axis 4
+// for a right-edge Notification Center gesture with exactly two contacts; it
+// must not be interpreted as a Dock swipe or downgraded for older peers.
 // Signed progress/velocity use the injection convention, with native phase
 // 1=begin, 2=change, 4=end, 8=cancel.
 message SystemGesture {
@@ -249,6 +251,10 @@ message SystemGesture {
   // v3: 2 for pinch/spread, 3 or 4 for a multi-finger swipe. Zero means the
   // legacy receiver-selected default and remains valid in v1/v2 frames.
   uint32 finger_count = 8;
+  // v4 only: normalized per-event FluidTouch displacement, including both axes.
+  // Earlier gesture types and versions must leave these at zero.
+  double delta_x = 9;
+  double delta_y = 10;
 }
 
 message InputEvent {
